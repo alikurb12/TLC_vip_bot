@@ -24,7 +24,7 @@ class CryptoService:
             self.logger.error(f"Ошибка при создании инвойса: {e}")
             return None
         
-    def checl_invoice(self, invoice_id: str) -> dict:
+    def check_invoice(self, invoice_id: str) -> dict:
         url = "https://pay.crypt.bot/api/checkInvoice"
         headers = {"Crypto-Pay-API-Token": self.token}
         params = {"invoice_ids": invoice_id}
