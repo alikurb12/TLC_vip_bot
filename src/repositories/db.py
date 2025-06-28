@@ -1,9 +1,9 @@
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime
-from src.models.user import User
-from src.models.payments import Payment
-from src.logger.logger import Logger
+from models.user import User
+from models.payment import Payment
+from logger.logger import Logger
 
 class Repository:
     def __init__(self, db_config : dict, logger: Logger):
@@ -36,21 +36,24 @@ class Repository:
     
     def save_user(self, user: User):
         try:
-            self.logger.info(f"Сохранение пользователя {user.user_id}")
+            self.logger.info(f"Сохранение пользователя: user_id={user.user_id}, subscription_end={user.subscription_end}, exchange={user.exchange}, api_key={user.api_key}, username={user.username}")
             self.cursor.execute(
                 """
                 INSERT INTO users (user_id, subscription_end, exchange, api_key, username)
                 VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (user_id)
-                DO UPDATE SET subscription_end = EXCLUDED.subscription_end
+                DO UPDATE SET subscription_end = EXCLUDED.subscription_end,
+                            exchange = EXCLUDED.exchange,
+                            api_key = EXCLUDED.api_key,
+                            username = EXCLUDED.username
                 """,
                 (user.user_id, user.subscription_end, user.exchange, user.api_key, user.username)
             )
-
             self.conn.commit()
-            self.logger.info(f"Пользователь {user.user_id} успешно сохранен")
+            self.logger.info(f"Пользователь {user.user_id} успешно сохранён в базе данных")
         except Exception as e:
-            self.logger.error(f"Ошибка при сохранении пользователя {user.user_id}: {e}")
+            self.conn.rollback()
+            self.logger.error(f"Ошибка при сохранении пользователя {user.user_id}: {str(e)}")
             raise
 
     def delete_user(self, user_id: int):
@@ -126,7 +129,7 @@ class Repository:
             self.logger.error(f"Ошибка при получении платежей для пользователя {user_id}: {e}")
             raise
     
-    def get_latest_payment(self, user_id: int) -> Payment:
+    def get_last_payment(self, user_id: int) -> Payment:
         self.logger.info(f"Получение последнего платежа для пользователя с ID {user_id}")
         try:
             self.cursor.execute(

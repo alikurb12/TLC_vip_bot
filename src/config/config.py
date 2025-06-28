@@ -5,8 +5,7 @@ class Config:
     def __init__(self):
         load_dotenv()
         self.bot_token = os.getenv("BOT_TOKEN")
-        self.crypo_bot_token = os.getenv("CRYPTO_BOT_TOKEN")
-        self.group_id = os.getenv("GROUP_ID")
+        self.crypto_bot_token = os.getenv("CRYPTO_BOT_TOKEN")
         self.db_config = {
             "host": os.getenv("DB_HOST"),
             "port": os.getenv("DB_PORT"),
@@ -18,12 +17,13 @@ class Config:
     def validate(self):
         if not all([
             self.bot_token,
-            self.crypo_bot_token,
-            self.group_id,
+            self.crypto_bot_token,
             self.db_config["host"],
             self.db_config["port"],
             self.db_config["user"],
             self.db_config["password"],
             self.db_config["database"]
         ]):
-            raise ValueError("Не все переменные окружения заданы. Проверьте файл .env.")
+            raise ValueError("Не все переменные окружения заданы")
+
+config = Config()
