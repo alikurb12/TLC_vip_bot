@@ -6,7 +6,7 @@ from models.payment import Payment
 from logger.logger import Logger
 
 class Repository:
-    def __init__(self, db_config : dict, logger: Logger):
+    def __init__(self, db_config: dict, logger: Logger):
         self.logger = logger
         try:
             self.conn = psycopg2.connect(**db_config, cursor_factory=RealDictCursor)
@@ -27,27 +27,31 @@ class Repository:
                     subscription_end=result.get('subscription_end'),
                     exchange=result.get('exchange'),
                     api_key=result.get('api_key'),
-                    username=result.get('username')
+                    username=result.get('username'),
+                    is_referral=result.get('is_referral', False),
+                    subscription_type=result.get('subscription_type')
                 )
             return None
         except Exception as e:
             self.logger.error(f"Ошибка при получении пользователя: {e}")
             raise
-    
+
     def save_user(self, user: User):
         try:
-            self.logger.info(f"Сохранение пользователя: user_id={user.user_id}, subscription_end={user.subscription_end}, exchange={user.exchange}, api_key={user.api_key}, username={user.username}")
+            self.logger.info(f"Сохранение пользователя: user_id={user.user_id}, subscription_end={user.subscription_end}, exchange={user.exchange}, api_key={user.api_key}, username={user.username}, is_referral={user.is_referral}, subscription_type={user.subscription_type}")
             self.cursor.execute(
                 """
-                INSERT INTO users (user_id, subscription_end, exchange, api_key, username)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO users (user_id, subscription_end, exchange, api_key, username, is_referral, subscription_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (user_id)
                 DO UPDATE SET subscription_end = EXCLUDED.subscription_end,
-                            exchange = EXCLUDED.exchange,
-                            api_key = EXCLUDED.api_key,
-                            username = EXCLUDED.username
+                              exchange = EXCLUDED.exchange,
+                              api_key = EXCLUDED.api_key,
+                              username = EXCLUDED.username,
+                              is_referral = EXCLUDED.is_referral,
+                              subscription_type = EXCLUDED.subscription_type
                 """,
-                (user.user_id, user.subscription_end, user.exchange, user.api_key, user.username)
+                (user.user_id, user.subscription_end, user.exchange, user.api_key, user.username, user.is_referral, user.subscription_type)
             )
             self.conn.commit()
             self.logger.info(f"Пользователь {user.user_id} успешно сохранён в базе данных")
@@ -78,12 +82,14 @@ class Repository:
                 subscription_end=result.get('subscription_end'),
                 exchange=result.get('exchange'),
                 api_key=result.get('api_key'),
-                username=result.get('username')
+                username=result.get('username'),
+                is_referral=result.get('is_referral', False),
+                subscription_type=result.get('subscription_type')
             ) for result in results]
         except Exception as e:
             self.logger.error(f"Ошибка при получении просроченных пользователей: {e}")
             raise
-    
+
     def save_payment(self, payment: Payment):
         try:
             self.logger.info(f"Сохранение платежа для пользователя {payment.user_id} на сумму {payment.amount} {payment.currency}")
@@ -112,7 +118,7 @@ class Repository:
         except Exception as e:
             self.logger.error(f"Ошибка при обновлении статуса платежа для инвойса {invoice_id}: {e}")
             raise
-    
+
     def get_payments_by_user(self, user_id: int) -> list[Payment]:
         self.logger.info(f"Получение платежей для пользователя с ID {user_id}")
         try:
@@ -128,7 +134,7 @@ class Repository:
         except Exception as e:
             self.logger.error(f"Ошибка при получении платежей для пользователя {user_id}: {e}")
             raise
-    
+
     def get_last_payment(self, user_id: int) -> Payment:
         self.logger.info(f"Получение последнего платежа для пользователя с ID {user_id}")
         try:
@@ -149,7 +155,7 @@ class Repository:
         except Exception as e:
             self.logger.error(f"Ошибка при получении последнего платежа для пользователя {user_id}: {e}")
             raise
-    
+
     def __del__(self):
         self.cursor.close()
         self.conn.close()

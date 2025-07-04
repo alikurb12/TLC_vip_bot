@@ -10,11 +10,20 @@ from logger.logger import Logger
 
 class BotService:
     TARIFFS = {
-        "test": {"days": 1, "price": 5, "name": "Тестовый (1 день)"},
-        "1month": {"days": 30, "price": 70, "name": "1 месяц"},
-        "3months": {"days": 90, "price": 160, "name": "3 месяца (Выгода 50$)"},
-        "6months": {"days": 180, "price": 320, "name": "6 месяцев (Выгода 100$)"},
-        "12months": {"days": 365, "price": 640, "name": "12 месяцев (Выгода 200$)"}
+        "regular": {
+            "test": {"days": 1, "price": 5, "name": "Тестовый (1 день)"},
+            "1month": {"days": 30, "price": 70, "name": "1 месяц"},
+            "3months": {"days": 90, "price": 160, "name": "3 месяца (Выгода 50$)"},
+            "6months": {"days": 180, "price": 320, "name": "6 месяцев (Выгода 100$)"},
+            "12months": {"days": 365, "price": 640, "name": "12 месяцев (Выгода 200$)"}
+        },
+        "referral": {
+            "test": {"days": 1, "price": 2.5, "name": "Тестовый (1 день, реферал)"},
+            "1month": {"days": 30, "price": 35, "name": "1 месяц (реферал)"},
+            "3months": {"days": 90, "price": 80, "name": "3 месяца (реферал, Выгода 25$)"},
+            "6months": {"days": 180, "price": 160, "name": "6 месяцев (реферал, Выгода 50$)"},
+            "12months": {"days": 365, "price": 320, "name": "12 месяцев (реферал, Выгода 100$)"}
+        }
     }
 
     SUPPORTED_EXCHANGES = ["Binance", "Bybit", "Kraken", "OKX"]
@@ -24,14 +33,42 @@ class BotService:
         self.crypto_service = crypto_service
         self.logger = logger
 
-    async def request_exchange(self, user_id: int, message: types.Message, bot: Bot):
-        keyboard = types.ReplyKeyboardMarkup(
-            keyboard=[
-                [types.KeyboardButton(text=exchange)] for exchange in self.SUPPORTED_EXCHANGES
-            ],
-            resize_keyboard=True,
-            one_time_keyboard=True
+    def get_profile_text(self, user: User) -> str:
+        if not user:
+            return (
+                "👤 <b>Ваш профиль</b>\n"
+                "Статус подписки: <b>Отсутствует</b>\n"
+                "Пожалуйста, выберите тип подписки."
+            )
+        subscription_status = (
+            f"Активна до: <b>{user.subscription_end.strftime('%Y-%m-%d %H:%M:%S')}</b>"
+            if user.subscription_end and user.subscription_end > datetime.now()
+            else "Истекла или отсутствует"
         )
+        subscription_type = (
+            "Реферальная" if user.is_referral else "Обычная" if user.subscription_type else "Не выбрана"
+        )
+        exchange_info = user.exchange if user.exchange else "Не указана"
+        api_key_info = "Установлен" if user.api_key else "Не установлен"
+        return (
+            f"👤 <b>Ваш профиль</b>\n"
+            f"ID: <b>{user.user_id}</b>\n"
+            f"Username: <b>@{user.username}</b>\n"
+            f"Тип подписки: <b>{subscription_type}</b>\n"
+            f"Статус подписки: <b>{subscription_status}</b>\n"
+            f"Биржа: <b>{exchange_info}</b>\n"
+            f"API-ключ: <b>{api_key_info}</b>"
+        )
+
+    async def request_exchange(self, user_id: int, message: types.Message, bot: Bot):
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text=exchange, callback_data=f"exchange:{exchange}")]
+            for exchange in self.SUPPORTED_EXCHANGES
+        ])
+        keyboard.inline_keyboard.append([
+            types.InlineKeyboardButton(text="📞 Поддержка", callback_data="support"),
+            types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+        ])
         await bot.send_message(
             user_id,
             "Выберите биржу, с которой вы работаете:",
@@ -39,6 +76,9 @@ class BotService:
         )
 
     async def request_api_key(self, user_id: int, message: types.Message, bot: Bot):
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
         await bot.send_message(
             user_id,
             "Пожалуйста, предоставьте API-ключ для выбранной биржи.\n\n"
@@ -49,7 +89,7 @@ class BotService:
             "4. Убедитесь, что ваш API-ключ настроен только с правами на чтение (без прав на торговлю или вывод).\n\n"
             "Введите API-ключ:",
             parse_mode="HTML",
-            reply_markup=types.ReplyKeyboardRemove()
+            reply_markup=keyboard
         )
 
     async def save_exchange_and_api(self, user_id: int, exchange: str, api_key: str, username: str = None):
@@ -66,7 +106,9 @@ class BotService:
             raise
 
     async def process_payment(self, user_id: int, tariff_id: str, message: types.Message, bot: Bot):
-        tariff = self.TARIFFS.get(tariff_id)
+        user = self.repo.get_user(user_id)
+        subscription_type = user.subscription_type if user and user.subscription_type else "regular"
+        tariff = self.TARIFFS[subscription_type].get(tariff_id)
         if not tariff:
             await message.answer("Неверный тариф.")
             return
@@ -95,7 +137,8 @@ class BotService:
             return
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_payment:{tariff_id}")]
+            [types.InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_payment:{tariff_id}")],
+            [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
         await bot.send_message(
             user_id,
@@ -111,38 +154,57 @@ class BotService:
         payment = self.repo.get_last_payment(user_id)
         if not payment:
             await message.answer("У вас нет активных платежей для проверки.")
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await message.answer("Вернитесь в главное меню:", reply_markup=keyboard)
             return
 
         invoice = self.crypto_service.check_invoice(payment.invoice_id)
         if not invoice or not invoice.get("ok") or not invoice["result"]["items"]:
             self.logger.error("Ошибка проверки статуса платежа")
             await message.answer("Ошибка при проверке статуса платежа. Попробуйте позже.")
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await message.answer("Вернитесь в главное меню:", reply_markup=keyboard)
             return
 
         if invoice["result"]["items"][0]["status"] != "paid":
             await message.answer("Платеж еще не подтвержден. Попробуйте снова.")
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="🏠 Главое меню", callback_data="main_menu")]
+            ])
+            await message.answer("Вернитесь в главное меню:", reply_markup=keyboard)
             return
 
         amount = float(invoice["result"]["items"][0]["amount"])
         self.logger.info(f"Полученная сумма платежа: {amount}, tariff_id: {tariff_id}")
-        tariff_id = next((tid for tid, t in self.TARIFFS.items() if abs(t["price"] - amount) < 0.01), None)
+        user = self.repo.get_user(user_id)
+        subscription_type = user.subscription_type if user and user.subscription_type else "regular"
+        tariff_id = next((tid for tid, t in self.TARIFFS[subscription_type].items() if abs(t["price"] - amount) < 0.01), None)
         if not tariff_id:
             self.logger.error(f"Ошибка определения тарифа для суммы: {amount}")
             await message.answer("Ошибка определения тарифа. Свяжитесь с поддержкой.")
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await message.answer("Вернитесь в главное меню:", reply_markup=keyboard)
             return
 
-        user = self.repo.get_user(user_id)
         current = datetime.now()
         if user and user.subscription_end and user.subscription_end > current:
             current = user.subscription_end
 
-        new_end = current + timedelta(days=self.TARIFFS[tariff_id]["days"])
+        new_end = current + timedelta(days=self.TARIFFS[subscription_type][tariff_id]["days"])
         user = User(
             user_id=user_id,
             subscription_end=new_end,
             exchange=user.exchange if user else None,
             api_key=user.api_key if user else None,
-            username=username or (user.username if user else None)
+            username=username or (user.username if user else None),
+            is_referral=user.is_referral if user else False,
+            subscription_type=subscription_type
         )
         try:
             self.repo.save_user(user)
@@ -150,28 +212,35 @@ class BotService:
         except Exception as e:
             self.logger.error(f"Ошибка обновления подписки: {e}")
             await message.answer("Ошибка при обновлении подписки.")
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await message.answer("Вернитесь в главное меню:", reply_markup=keyboard)
             return
 
         await message.answer(
             f"✅ Оплата подтверждена! Ваша подписка активна до: <b>{new_end.strftime('%Y-%m-%d %H:%M:%S')}</b>",
             parse_mode="HTML"
         )
-        # Запрашиваем биржу после успешной оплаты, если она еще не указана
-        if not user or not user.exchange:
+        profile_text = self.get_profile_text(user)
+        keyboard = self.get_profile_keyboard(user)
+        await bot.send_message(user_id, profile_text, parse_mode="HTML", reply_markup=keyboard)
+        
+        if not user.exchange:
             await self.request_exchange(user_id, message, bot)
 
     async def check_subscriptions(self, bot: Bot):
         while True:
             try:
                 expired_users = self.repo.get_expired_users()
-                for user_id in expired_users:
+                for user in expired_users:
                     try:
-                        await bot.send_message(user_id, "Ваша подписка истекла. Пожалуйста, продлите её.")
+                        await bot.send_message(user.user_id, "Ваша подписка истекла. Пожалуйста, продлите её.")
                     except TelegramForbiddenError:
-                        self.logger.error(f"Бот заблокирован пользователем {user_id}")
+                        self.logger.error(f"Бот заблокирован пользователем {user.user_id}")
                     except Exception as e:
-                        self.logger.error(f"Ошибка отправки сообщения пользователю {user_id}: {e}")
-                    self.repo.delete_user(user_id)
+                        self.logger.error(f"Ошибка отправки сообщения пользователю {user.user_id}: {e}")
+                    self.repo.delete_user(user.user_id)
             except Exception as e:
                 self.logger.error(f"Ошибка проверки подписок: {e}")
-            await asyncio.sleep(3600)  # Проверка каждый час
+            await asyncio.sleep(3600)
